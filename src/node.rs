@@ -273,25 +273,38 @@ impl Nodes {
 
     pub fn reassemble_dataframes<'a>(
         &'a self,
-        mut dataframe: &'a DataFrame,
+        dataframe: &'a DataFrame,
     ) -> Result<Vec<u8>, ReassableError> {
-        let expected_hash = dataframe.hash;
-        let mut data = dataframe.data.clone();
-
-        while !dataframe.next.is_empty() {
-            for cid in dataframe.next.iter() {
-                let Some(next_node) = self.nodes.get(cid) else {
-                    return Err(ReassableError::MissedCid(*cid));
+        let mut dataframes = vec![dataframe];
+        let total = dataframe.total.unwrap_or_default() as usize;
+        if total > 1 {
+            let mut next_cids = dataframe.next.clone();
+            while let Some(cid) = next_cids.pop() {
+                let Some(node) = self.nodes.get(&cid) else {
+                    return Err(ReassableError::MissedCid(cid));
                 };
-                let Node::DataFrame(node) = next_node else {
-                    return Err(ReassableError::InvalidNode(next_node.kind()));
+                let Node::DataFrame(dataframe) = node else {
+                    return Err(ReassableError::InvalidNode(node.kind()));
                 };
-                data.extend(&node.data);
-                dataframe = node;
+                next_cids.extend(&dataframe.next);
+                dataframes.push(dataframe);
             }
+            if dataframes.len() != total {
+                return Err(ReassableError::InvalidNumberOfDataFrames {
+                    expected: total,
+                    found: dataframes.len(),
+                });
+            }
+            dataframes.sort_by_key(|frame| frame.index.unwrap_or_default());
         }
 
-        if let Some(expected) = expected_hash {
+        let data: Vec<u8> = dataframes
+            .iter()
+            .flat_map(|frame| frame.data.iter())
+            .copied()
+            .collect();
+
+        if let Some(expected) = dataframe.hash {
             let crc64 = get_crc64(&data);
             if crc64 != expected {
                 // maybe it's the legacy checksum function?
@@ -385,6 +398,8 @@ impl NodeError {
 pub enum ReassableError {
     #[error("missed cid: {0}")]
     MissedCid(Cid),
+    #[error("expected {expected} DataFrames, found: {found}")]
+    InvalidNumberOfDataFrames { expected: usize, found: usize },
     #[error("invalid node kind: {0:?} (expected DataFrame)")]
     InvalidNode(Kind),
     #[error("invalid hash: crc64/{crc64} fnv/{fnv} (expected: {expected}")]
