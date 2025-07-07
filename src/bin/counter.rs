@@ -38,14 +38,21 @@ async fn main() -> anyhow::Result<()> {
     if !args.parse {
         let bar = ProgressBar::no_length()
             .with_style(ProgressStyle::with_template("{spinner} {pos}").expect("valid template"));
+        let mut counter = 0;
         while reader.read_node().await?.is_some() {
-            bar.inc(1);
+            counter += 1;
+            if counter >= 4096 {
+                bar.inc(counter);
+                counter = 0;
+            }
         }
+        bar.inc(counter);
         bar.finish();
         return Ok(());
     }
 
     let mut bar = ReaderProgressBar::new();
+    let mut next_slot = None;
     loop {
         let nodes = Nodes::read_until_block(&mut reader).await?;
         if nodes.nodes.is_empty() {
@@ -66,17 +73,30 @@ async fn main() -> anyhow::Result<()> {
                     let buffer = nodes
                         .reassemble_dataframes(&frame.metadata)
                         .context("failed to build tx metadata")?;
-                    let buffer = zstd::decode_all(buffer.as_slice())
-                        .context("failed to decompress tx metadata")?; // TODO: failed to decompress tx metadata
-                    let metadata = generated::TransactionStatusMeta::decode(buffer.as_slice())
-                        .context("failed to decode tx metadata")?;
-                    let _metadata = TransactionStatusMeta::try_from(metadata)
-                        .context("failed to convert protobuf tx metadata")?;
+                    if buffer.is_empty() {
+                        bar.transaction_meta_empty += 1;
+                    } else {
+                        let buffer = zstd::decode_all(buffer.as_slice())
+                            .context("failed to decompress tx metadata")?;
+                        let metadata = generated::TransactionStatusMeta::decode(buffer.as_slice())
+                            .context("failed to decode tx metadata")?; // TODO
+                        let _metadata = TransactionStatusMeta::try_from(metadata)
+                            .context("failed to convert protobuf tx metadata")?;
+                    }
 
                     bar.transaction_decode += 1;
                 }
                 Node::Entry(_) => bar.entry += 1,
-                Node::Block(_) => bar.block += 1,
+                Node::Block(frame) => {
+                    bar.block += 1;
+
+                    let expected_slot = match next_slot {
+                        Some(slot) => slot,
+                        None => frame.slot - frame.slot % 432_000,
+                    };
+                    next_slot = Some(frame.slot + 1);
+                    bar.block_skippped += frame.slot - expected_slot;
+                }
                 Node::Subset(_) => bar.subset += 1,
                 Node::Epoch(_) => bar.epoch += 1,
                 Node::Rewards(frame) => {
@@ -91,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
                     let buffer = zstd::decode_all(buffer.as_slice())
                         .context("failed to decompress rewards")?;
                     let _rewards = generated::Rewards::decode(buffer.as_slice())
-                        .context("failed to decode rewards")?;
+                        .context("failed to decode rewards")?; // TODO
 
                     bar.rewards_decode += 1;
                 }
@@ -126,6 +146,12 @@ struct ReaderProgressBar {
     pb_transaction_decode: ProgressBar,
     rewards_decode: u64,
     pb_rewards_decode: ProgressBar,
+    //
+    block_skippped: u64,
+    pb_block_skipped: ProgressBar,
+    //
+    transaction_meta_empty: u64,
+    pb_transaction_meta_empty: ProgressBar,
 }
 
 impl ReaderProgressBar {
@@ -151,6 +177,12 @@ impl ReaderProgressBar {
             pb_transaction_decode: Self::create_pbbar(&multi, "decoded", "transaction"),
             rewards_decode: 0,
             pb_rewards_decode: Self::create_pbbar(&multi, "decoded", "rewards"),
+            //
+            block_skippped: 0,
+            pb_block_skipped: Self::create_pbbar(&multi, "skipped", "block"),
+            //
+            transaction_meta_empty: 0,
+            pb_transaction_meta_empty: Self::create_pbbar(&multi, "meta_empty", "transaction"),
         }
     }
 
@@ -164,27 +196,38 @@ impl ReaderProgressBar {
     }
 
     fn report(&self) {
-        self.pb_transaction.set_position(self.transaction);
-        self.pb_entry.set_position(self.entry);
-        self.pb_block.set_position(self.block);
-        self.pb_subset.set_position(self.subset);
-        self.pb_epoch.set_position(self.epoch);
-        self.pb_rewards.set_position(self.rewards);
-        self.pb_dataframe.set_position(self.dataframe);
-        self.pb_transaction_decode
-            .set_position(self.transaction_decode);
-        self.pb_rewards_decode.set_position(self.rewards_decode);
+        for (pb, pos) in [
+            (&self.pb_transaction, self.transaction),
+            (&self.pb_entry, self.entry),
+            (&self.pb_block, self.block),
+            (&self.pb_subset, self.subset),
+            (&self.pb_epoch, self.epoch),
+            (&self.pb_rewards, self.rewards),
+            (&self.pb_dataframe, self.dataframe),
+            (&self.pb_transaction_decode, self.transaction_decode),
+            (&self.pb_rewards_decode, self.rewards_decode),
+            (&self.pb_block_skipped, self.block_skippped),
+            (&self.pb_transaction_meta_empty, self.transaction_meta_empty),
+        ] {
+            pb.set_position(pos);
+        }
     }
 
     fn finish(&self) {
-        self.pb_transaction.finish();
-        self.pb_entry.finish();
-        self.pb_block.finish();
-        self.pb_subset.finish();
-        self.pb_epoch.finish();
-        self.pb_rewards.finish();
-        self.pb_dataframe.finish();
-        self.pb_transaction_decode.finish();
-        self.pb_rewards_decode.finish();
+        for pb in [
+            &self.pb_transaction,
+            &self.pb_entry,
+            &self.pb_block,
+            &self.pb_subset,
+            &self.pb_epoch,
+            &self.pb_rewards,
+            &self.pb_dataframe,
+            &self.pb_transaction_decode,
+            &self.pb_rewards_decode,
+            &self.pb_block_skipped,
+            &self.pb_transaction_meta_empty,
+        ] {
+            pb.finish();
+        }
     }
 }
