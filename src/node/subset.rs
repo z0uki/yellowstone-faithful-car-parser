@@ -1,14 +1,20 @@
 use {
-    crate::node::{Kind, NodeError},
+    crate::{
+        node::{Kind, NodeError},
+        util,
+    },
     cid::Cid,
 };
 
 // type Subset struct {
-// 	Kind   int
-// 	First  int
-// 	Last   int
-// 	Blocks List__Link
-// }
+//   kind   Int
+//   # First slot in this subset.
+//   first  Int
+//   # Last slot in this subset.
+//   last   Int
+//   # The list of blocks in this subset.
+//   blocks [ Link ] # [ &Block ]
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Subset {
     pub first: u64,
@@ -29,22 +35,22 @@ impl TryFrom<serde_cbor::Value> for Subset {
 
     fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(vec) = value {
-            if let Some(serde_cbor::Value::Integer(kind)) = vec.first() {
-                NodeError::assert_invalid_kind(*kind as u64, Kind::Subset)?;
-            }
-            if let Some(serde_cbor::Value::Integer(first)) = vec.get(1) {
-                node.first = *first as u64;
-            }
-            if let Some(serde_cbor::Value::Integer(last)) = vec.get(2) {
-                node.last = *last as u64;
-            }
-            if let Some(serde_cbor::Value::Array(blocks)) = &vec.get(3) {
-                for block in blocks {
-                    if let serde_cbor::Value::Bytes(block) = block {
-                        node.blocks.push(Cid::try_from(&block[1..])?);
-                    }
+        for (index, value) in util::cbor::get_array(value, "Subset")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => NodeError::assert_invalid_kind(
+                    util::cbor::get_int(value, "Subset::kind")? as u64,
+                    Kind::Subset,
+                )?,
+                1 => node.first = util::cbor::get_int(value, "Subset::first")? as u64,
+                2 => node.last = util::cbor::get_int(value, "Subset::last")? as u64,
+                3 => {
+                    node.blocks =
+                        util::cbor::get_array_cids(value, "Subset::blocks", "Subset::blocks[]")?
                 }
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
         Ok(node)

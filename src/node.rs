@@ -287,7 +287,7 @@ impl Nodes {
                     return Err(ReassableError::InvalidNode(next_node.kind()));
                 };
                 data.extend(&node.data);
-                dataframe = node; // TODO: only one frame in next?
+                dataframe = node;
             }
         }
 
@@ -337,6 +337,13 @@ pub enum NodeError {
     // deserialize
     #[error(transparent)]
     DeserializeCbor(#[from] serde_cbor::Error),
+    #[error("expected {kind:?} for {path:?}")]
+    UnexpectedCborValue {
+        path: &'static str,
+        kind: &'static str,
+    },
+    #[error("too much items in the array")]
+    UnexpectedCborValues,
     #[error("invalid node kind: {node:?} (expected: {expected:?})")]
     InvalidKind { node: u64, expected: u64 },
     #[error("unknown node kind: {0:?}")]

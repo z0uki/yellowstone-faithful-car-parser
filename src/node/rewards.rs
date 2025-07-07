@@ -1,10 +1,15 @@
-use crate::node::{DataFrame, Kind, NodeError};
+use crate::{
+    node::{DataFrame, Kind, NodeError},
+    util,
+};
 
 // type Rewards struct {
-// 	Kind int
-// 	Slot int
-// 	Data DataFrame
-// }
+//   kind       Int
+//   # The slot number for which these rewards are for.
+//   slot       Int
+//   # The raw rewards data.
+//   data       DataFrame
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Rewards {
     pub slot: u64,
@@ -24,25 +29,21 @@ impl TryFrom<serde_cbor::Value> for Rewards {
 
     fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(mut vec) = value {
-            if let Some(serde_cbor::Value::Integer(kind)) = vec.first() {
-                NodeError::assert_invalid_kind(*kind as u64, Kind::Rewards)?;
-            }
-            if let Some(serde_cbor::Value::Integer(slot)) = vec.get(1) {
-                node.slot = *slot as u64;
-            }
-            if let Some(serde_cbor::Value::Array(data)) = vec.get_mut(2) {
-                node.data = DataFrame::try_from(serde_cbor::Value::Array(std::mem::take(data)))?;
+        for (index, value) in util::cbor::get_array(value, "Rewards")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => NodeError::assert_invalid_kind(
+                    util::cbor::get_int(value, "Rewards::kind")? as u64,
+                    Kind::Rewards,
+                )?,
+                1 => node.slot = util::cbor::get_int(value, "Rewards::slot")? as u64,
+                2 => node.data = DataFrame::try_from(value)?,
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
         Ok(node)
-    }
-}
-
-impl Rewards {
-    /// Returns whether the rewards data is complete or is split into multiple dataframes.
-    pub const fn is_complete(&self) -> bool {
-        self.data.next.is_empty()
     }
 }
 

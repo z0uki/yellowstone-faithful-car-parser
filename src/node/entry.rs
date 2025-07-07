@@ -1,14 +1,18 @@
 use {
-    crate::node::{Kind, NodeError},
+    crate::{
+        node::{Kind, NodeError},
+        util,
+    },
     cid::Cid,
 };
 
 // type Entry struct {
-// 	Kind         int
-// 	NumHashes    int
-// 	Hash         []uint8
-// 	Transactions List__Link
-// }
+//   kind         Int
+//   numHashes    Int
+//   hash         Hash
+//   # The list of transactions in this entry.
+//   transactions [ Link ] # [ &Transaction ]
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Entry {
     pub num_hashes: u64,
@@ -29,22 +33,25 @@ impl TryFrom<serde_cbor::Value> for Entry {
 
     fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(mut vec) = value {
-            if let Some(serde_cbor::Value::Integer(kind)) = vec.first() {
-                NodeError::assert_invalid_kind(*kind as u64, Kind::Entry)?;
-            }
-            if let Some(serde_cbor::Value::Integer(num_hashes)) = vec.get(1) {
-                node.num_hashes = *num_hashes as u64;
-            }
-            if let Some(serde_cbor::Value::Bytes(vec)) = vec.get_mut(2) {
-                node.hash = std::mem::take(vec);
-            }
-            if let Some(serde_cbor::Value::Array(transactions)) = &vec.get(3) {
-                for transaction in transactions {
-                    if let serde_cbor::Value::Bytes(transaction) = transaction {
-                        node.transactions.push(Cid::try_from(&transaction[1..])?);
-                    }
+        for (index, value) in util::cbor::get_array(value, "Entry")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => NodeError::assert_invalid_kind(
+                    util::cbor::get_int(value, "Entry::kind")? as u64,
+                    Kind::Entry,
+                )?,
+                1 => node.num_hashes = util::cbor::get_int(value, "Entry::num_hashes")? as u64,
+                2 => node.hash = util::cbor::get_bytes(value, "Entry::hash")?,
+                3 => {
+                    node.transactions = util::cbor::get_array_cids(
+                        value,
+                        "Entry::transactions",
+                        "Entry::transactions[]",
+                    )?
                 }
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
         Ok(node)

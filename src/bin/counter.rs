@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         let mut counter = 0;
         while reader.read_node().await?.is_some() {
             counter += 1;
-            if counter >= 4096 {
+            if counter >= 131072 {
                 bar.inc(counter);
                 counter = 0;
             }

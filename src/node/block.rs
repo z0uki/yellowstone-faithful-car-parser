@@ -1,19 +1,22 @@
 use {
-    crate::node::{Kind, NodeError},
+    crate::{
+        node::{Kind, NodeError},
+        util,
+    },
     cid::Cid,
 };
 
-// type (
-// 	List__Shredding []Shredding
-// 	Block           struct {
-// 		Kind      int
-// 		Slot      int
-// 		Shredding List__Shredding
-// 		Entries   List__Link
-// 		Meta      SlotMeta
-// 		Rewards   datamodel.Link
-// 	}
-// )
+// type Block struct {
+//   kind      Int
+//   # The slot number where this block was created.
+//   slot      Int
+//   shredding [ Shredding ]
+//   entries   [ Link ] # [ &Entry ]
+//   # The metadata for this block.
+//   meta      SlotMeta
+//   # Link to the rewards for this block.
+//   rewards   Link     # &Rewards
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Block {
     pub slot: u64,
@@ -36,33 +39,28 @@ impl TryFrom<serde_cbor::Value> for Block {
 
     fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(mut vec) = value {
-            if let Some(serde_cbor::Value::Integer(kind)) = vec.first() {
-                NodeError::assert_invalid_kind(*kind as u64, Kind::Block)?;
-            }
-            if let Some(serde_cbor::Value::Integer(slot)) = vec.get(1) {
-                node.slot = *slot as u64;
-            }
-            if let Some(serde_cbor::Value::Array(shredding)) = vec.get_mut(2) {
-                for shred in shredding {
-                    if let serde_cbor::Value::Array(shred) = shred {
-                        let value = serde_cbor::Value::Array(std::mem::take(shred));
-                        node.shredding.push(Shredding::from(value));
+        for (index, value) in util::cbor::get_array(value, "Block")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => NodeError::assert_invalid_kind(
+                    util::cbor::get_int(value, "Block::kind")? as u64,
+                    Kind::Block,
+                )?,
+                1 => node.slot = util::cbor::get_int(value, "Block::slot")? as u64,
+                2 => {
+                    for value in util::cbor::get_array(value, "Block::shredding")? {
+                        node.shredding.push(Shredding::try_from(value)?);
                     }
                 }
-            }
-            if let Some(serde_cbor::Value::Array(entries)) = vec.get(3) {
-                for entry in entries {
-                    if let serde_cbor::Value::Bytes(vec) = entry {
-                        node.entries.push(Cid::try_from(&vec[1..])?);
-                    }
+                3 => {
+                    node.entries =
+                        util::cbor::get_array_cids(value, "Block::entries", "Block::entries[]")?
                 }
-            }
-            if let Some(serde_cbor::Value::Array(vec)) = vec.get_mut(4) {
-                node.meta = SlotMeta::from(serde_cbor::Value::Array(std::mem::take(vec)));
-            }
-            if let Some(serde_cbor::Value::Bytes(rewards)) = vec.get(5) {
-                node.rewards = Cid::try_from(&rewards[1..])?;
+                4 => node.meta = SlotMeta::try_from(value)?,
+                5 => node.rewards = util::cbor::get_cid(value, "Block::rewards")?,
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
         Ok(node)
@@ -70,35 +68,48 @@ impl TryFrom<serde_cbor::Value> for Block {
 }
 
 // type Shredding struct {
-// 	EntryEndIdx int
-// 	ShredEndIdx int
-// }
+//   entryEndIdx Int
+//   shredEndIdx Int
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Shredding {
     pub entry_end_idx: i64,
     pub shred_end_idx: i64,
 }
 
-impl From<serde_cbor::Value> for Shredding {
-    fn from(value: serde_cbor::Value) -> Self {
+impl TryFrom<serde_cbor::Value> for Shredding {
+    type Error = NodeError;
+
+    fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(vec) = value {
-            if let Some(serde_cbor::Value::Integer(entry_end_idx)) = vec.first() {
-                node.entry_end_idx = *entry_end_idx as i64;
-            }
-            if let Some(serde_cbor::Value::Integer(shred_end_idx)) = vec.get(1) {
-                node.shred_end_idx = *shred_end_idx as i64;
+        for (index, value) in util::cbor::get_array(value, "Shredding")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => {
+                    node.entry_end_idx =
+                        util::cbor::get_int(value, "Shredding::entry_end_idx")? as i64
+                }
+                1 => {
+                    node.shred_end_idx =
+                        util::cbor::get_int(value, "Shredding::shred_end_idx")? as i64
+                }
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
-        node
+        Ok(node)
     }
 }
 
 // type SlotMeta struct {
-// 	Parent_slot  int
-// 	Blocktime    int
-// 	Block_height **int
-// }
+//   # The parent slot of this slot.
+//   parent_slot         Int
+//   # Block time of this slot.
+//   blocktime           Int
+//   # Block height of this slot.
+//   block_height nullable optional Int
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct SlotMeta {
     pub parent_slot: u64,
@@ -106,21 +117,26 @@ pub struct SlotMeta {
     pub block_height: Option<u64>,
 }
 
-impl From<serde_cbor::Value> for SlotMeta {
-    fn from(value: serde_cbor::Value) -> Self {
+impl TryFrom<serde_cbor::Value> for SlotMeta {
+    type Error = NodeError;
+
+    fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(vec) = value {
-            if let Some(serde_cbor::Value::Integer(parent_slot)) = vec.first() {
-                node.parent_slot = *parent_slot as u64;
-            }
-            if let Some(serde_cbor::Value::Integer(blocktime)) = vec.get(1) {
-                node.blocktime = *blocktime as u64;
-            }
-            if let Some(serde_cbor::Value::Integer(block_height)) = vec.get(2) {
-                node.block_height = Some(*block_height as u64);
+        for (index, value) in util::cbor::get_array(value, "SlotMeta")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => node.parent_slot = util::cbor::get_int(value, "SlotMeta::parent_slot")? as u64,
+                1 => node.blocktime = util::cbor::get_int(value, "SlotMeta::blocktime")? as u64,
+                2 => {
+                    node.block_height =
+                        util::cbor::get_int_opt(value, "SlotMeta::block_height")?.map(|v| v as u64)
+                }
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
-        node
+        Ok(node)
     }
 }
 

@@ -1,12 +1,19 @@
-use crate::node::{DataFrame, Kind, NodeError};
+use crate::{
+    node::{DataFrame, Kind, NodeError},
+    util,
+};
 
 // type Transaction struct {
-// 	Kind     int
-// 	Data     DataFrame
-// 	Metadata DataFrame
-// 	Slot     int
-// 	Index    **int
-// }
+//   kind     Int
+//   # Raw transaction data.
+//   data     DataFrame
+//   # Raw tx metadata data.
+//   metadata DataFrame
+//   # The slot number where this transaction was created.
+//   slot     Int
+//   # The index of the position of this transaction in the block (0-indexed).
+//   index nullable optional  Int
+// } representation tuple
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Transaction {
     pub data: DataFrame,
@@ -28,36 +35,26 @@ impl TryFrom<serde_cbor::Value> for Transaction {
 
     fn try_from(value: serde_cbor::Value) -> Result<Self, Self::Error> {
         let mut node = Self::default();
-        if let serde_cbor::Value::Array(mut vec) = value {
-            if let Some(serde_cbor::Value::Integer(kind)) = vec.first() {
-                NodeError::assert_invalid_kind(*kind as u64, Kind::Transaction)?;
-            }
-            if let Some(serde_cbor::Value::Array(vec)) = vec.get_mut(1) {
-                node.data = DataFrame::try_from(serde_cbor::Value::Array(std::mem::take(vec)))?;
-            }
-            if let Some(serde_cbor::Value::Array(vec)) = vec.get_mut(2) {
-                node.metadata = DataFrame::try_from(serde_cbor::Value::Array(std::mem::take(vec)))?;
-            }
-            if let Some(serde_cbor::Value::Integer(slot)) = vec.get(3) {
-                node.slot = *slot as u64;
-            }
-            if let Some(serde_cbor::Value::Integer(index)) = vec.get(4) {
-                node.index = Some(*index as u64);
+        for (index, value) in util::cbor::get_array(value, "Transaction")?
+            .into_iter()
+            .enumerate()
+        {
+            match index {
+                0 => NodeError::assert_invalid_kind(
+                    util::cbor::get_int(value, "Transaction::kind")? as u64,
+                    Kind::Transaction,
+                )?,
+                1 => node.data = DataFrame::try_from(value)?,
+                2 => node.metadata = DataFrame::try_from(value)?,
+                3 => node.slot = util::cbor::get_int(value, "Transaction::slot")? as u64,
+                4 => {
+                    node.index =
+                        util::cbor::get_int_opt(value, "Transaction::index")?.map(|v| v as u64)
+                }
+                _ => return Err(NodeError::UnexpectedCborValues),
             }
         }
         Ok(node)
-    }
-}
-
-impl Transaction {
-    /// Returns whether the transaction dataframe is complete or is split into multiple dataframes.
-    pub const fn is_complete_data(&self) -> bool {
-        self.data.next.is_empty()
-    }
-
-    /// Returns whether the transaction metadata is complete or is split into multiple dataframes.
-    pub const fn is_complete_metadata(&self) -> bool {
-        self.metadata.next.is_empty()
     }
 }
 
