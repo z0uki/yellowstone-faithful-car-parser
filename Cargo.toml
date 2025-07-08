@@ -1,8 +1,9 @@
 [package]
 name = "yellowstone-faithful-car-parser"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Triton One", "Lamports Dev"]
 edition = "2024"
+description = "CAR parser for Yellowstone Old Faithful project"
 homepage = "https://lamports.dev"
 repository = "https://github.com/lamports-dev/yellowstone-faithful-car-parser"
 license = "AGPL-3.0-only"
