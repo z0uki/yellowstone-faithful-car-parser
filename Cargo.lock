@@ -5162,6 +5162,7 @@ dependencies = [
  "indicatif",
  "multihash",
  "prost",
+ "serde",
  "serde_cbor",
  "solana-sdk",
  "solana-storage-proto",

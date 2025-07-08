@@ -25,6 +25,7 @@ indexmap = "2.10.0"
 indicatif = { version = "0.18.0", optional = true }
 multihash = "0.19.3"
 prost = { version = "0.11.9", optional = true }
+serde = { version = "1.0.219", optional = true }
 serde_cbor = "0.11.2"
 solana-sdk = { version = "~2.2.2", optional = true }
 solana-storage-proto = { version = "~2.2.19", optional = true }
@@ -44,6 +45,7 @@ counter = [
     "dep:clap",
     "dep:indicatif",
     "dep:prost",
+    "dep:serde",
     "dep:solana-sdk",
     "dep:solana-storage-proto",
     "dep:solana-transaction-status",
