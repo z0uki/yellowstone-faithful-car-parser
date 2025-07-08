@@ -38,7 +38,7 @@ zstd = { version = "0.13.3", optional = true }
 const-hex = "1.14.1"
 
 [features]
-default = ["counter"]
+default = []
 counter = [
     "dep:anyhow",
     "dep:bincode",
