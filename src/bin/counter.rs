@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
                         let buffer = zstd::decode_all(buffer.as_slice())
                             .context("failed to decompress tx metadata")?;
                         if decode_protobuf_bincode::<
-                            Vec<StoredTransactionStatusMeta>,
+                            StoredTransactionStatusMeta,
                             generated::TransactionStatusMeta,
                         >("tx metadata", &buffer)
                         .is_ok()
@@ -295,7 +295,7 @@ where
 #[allow(dead_code)]
 #[derive(Deserialize)]
 struct StoredTransactionStatusMeta {
-    err: Option<TransactionError>,
+    err: Result<(), TransactionError>,
     fee: u64,
     pre_balances: Vec<u64>,
     post_balances: Vec<u64>,
